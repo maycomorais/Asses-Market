@@ -5258,17 +5258,9 @@ function _pushSuportado() {
  * Retorna "" se não configurada.
  */
 async function _pushCarregarVapidKey() {
-  if (_vapidKeyCache !== null) return _vapidKeyCache;
-  try {
-    const { data } = await supa
-      .from("configuracoes")
-      .select("vapid_public_key")
-      .maybeSingle();
-    _vapidKeyCache = (data?.vapid_public_key || "").trim();
-  } catch (_) {
-    _vapidKeyCache = "";
-  }
-  return _vapidKeyCache;
+  // Chave pública configurada diretamente aqui (seguro, pois é uma chave pública).
+  // Substitua pelo valor que você gerou no terminal.
+  return "BK1XvptGwmUZa8bH_fxBxzhYJCD82H2UHk0vGBa6pAlIcfvmGg55iMU44BCimON33mra_SxsQBVLrEi1oO2u-Iw";
 }
 
 /**
