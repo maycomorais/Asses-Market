@@ -21,7 +21,7 @@ let WHATSAPP_LOJA_CFG = ""; // whatsapp_loja (dígitos)
 let NOME_RESTAURANTE = ""; // nome_restaurante
 let FEATURES_ATIVAS = null; // features_ativas JSONB
 let TABELA_FRETE_ADMIN = null; // tabela_frete (carregada do banco para calcularFretePDV)
-let _estDados = [];
+
 let perfilUsuario = null;
 let _perfilId = null; // UUID do usuário logado
 let _perfilNome = null; // nome_display do usuário logado
