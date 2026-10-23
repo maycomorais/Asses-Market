@@ -21,7 +21,7 @@ let WHATSAPP_LOJA_CFG = ""; // whatsapp_loja (dígitos)
 let NOME_RESTAURANTE = ""; // nome_restaurante
 let FEATURES_ATIVAS = null; // features_ativas JSONB
 let TABELA_FRETE_ADMIN = null; // tabela_frete (carregada do banco para calcularFretePDV)
-
+let _estDados = [];
 let perfilUsuario = null;
 let _perfilId = null; // UUID do usuário logado
 let _perfilNome = null; // nome_display do usuário logado
@@ -121,6 +121,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     _perfilId = session.user.id;
     _perfilNome = perfil?.nome_display || session.user.email || "Admin";
+    window._operadorNome = _perfilNome;
     perfilUsuario = perfil ? perfil.cargo : "dono";
 
     // Atualiza sidebar: nome, cargo e email
@@ -432,6 +433,13 @@ function showTab(tabId, event) {
   console.log("Tentando abrir aba:", tabId);
   console.log("Event:", event);
 
+  // 🔒 SEGURANÇA: Bloqueia acesso à aba Master para qualquer um que não seja adminMaster
+  if (tabId === "adminmaster" && perfilUsuario !== "adminMaster") {
+    console.warn("Acesso negado à aba Master.");
+    alert("Acesso restrito. Apenas o Admin Master pode acessar esta aba.");
+    return;
+  }
+
   // 1. O 'de-para' para garantir que IDs como 'categorias' ou 'motoboys'
   // abram a aba pai correta no seu novo HTML
   let realTabId = tabId;
@@ -484,8 +492,6 @@ function showTab(tabId, event) {
     if (tabId === "categorias") showSubTab("lista-categorias-wrapper");
     else if (tabId === "motoboys") showSubTab("lista-motos-wrapper");
     else {
-      // Clique direto em "Produtos": sempre abre a lista de produtos,
-      // ignorando qualquer sub-aba salva de navegação anterior (ex: Categorias).
       showSubTab("lista-produtos-wrapper");
     }
   }
@@ -658,26 +664,36 @@ function _feat(categoria, chave) {
 
 function _aplicarVisibilidadeAbas() {
   const mapa = {
-    "menu-pedidos": "pedidos",
-    "menu-cozinha": "cozinha",
-    "menu-pdv": "pdv",
-    "menu-financeiro": "financeiro",
-    "menu-inventario": "inventario",
-    "menu-equipe": "equipe",
+    "menu-pedidos":       "pedidos",
+    "menu-cozinha":       "cozinha",
+    "menu-pdv":           "pdv",
+    "menu-financeiro":    "financeiro",
+    "menu-inventario":    "inventario",
+    "menu-equipe":        "equipe",
     "menu-configuracoes": "configuracoes",
-    "menu-dashboard": "dashboard",
-    "menu-estatisticas": "estatisticas",
+    "menu-dashboard":     "dashboard",
+    "menu-estatisticas":  "estatisticas",
     "menu-ficha-tecnica": "ficha-tecnica",
-    "menu-crm": "crm",
-    "menu-turnos": "turnos",
-    "menu-produtos": "produtos",
-    "menu-categorias": "categorias",
-    "menu-motoboys": "motoboys",
-    "menu-mensalistas": "mensalistas",
-    "menu-filiais": "filiais",
-    "menu-notas": "notas",
-    "menu-facturacion": "facturacion",
+    "menu-crm":           "crm",
+    "menu-turnos":        "turnos",
+    "menu-produtos":      "produtos",
+    "menu-categorias":    "categorias",
+    "menu-motoboys":      "motoboys",
+    "menu-mensalistas":   "mensalistas",
+    "menu-filiais":       "filiais",
+    "menu-notas":         "notas",
+    "menu-facturacion":   "facturacion"
   };
+  
+  // 🔒 SEGURANÇA: Oculta a aba Master explicitamente para não-admins
+  const menuAM = document.getElementById("menu-adminmaster");
+  if (menuAM) {
+    if (perfilUsuario === "adminMaster") {
+      menuAM.style.setProperty("display", "flex", "important");
+    } else {
+      menuAM.style.setProperty("display", "none", "important");
+    }
+  }
 
   if (perfilUsuario === "adminMaster") return;
 
@@ -688,27 +704,21 @@ function _aplicarVisibilidadeAbas() {
       return;
     }
     const visivel = _feat("tabs", chave);
-
-    // Usa important para evitar que regras CSS de flexbox mostrem o item
+    
     if (visivel) {
       el.style.setProperty("display", "flex", "important");
     } else {
       el.style.setProperty("display", "none", "important");
     }
   });
-
+  
   _aplicarFuncionalidades();
 
   // Redirecionamento inteligente
   setTimeout(() => {
-    const activeMenu = document.querySelector(".sb-menu-item.active");
-    if (
-      activeMenu &&
-      (activeMenu.style.display === "none" || activeMenu.style.display === "")
-    ) {
-      const firstVisible = document.querySelector(
-        '.sb-menu-item[style*="display: flex"]',
-      );
+    const activeMenu = document.querySelector('.sb-menu-item.active');
+    if (activeMenu && (activeMenu.style.display === 'none' || activeMenu.style.display === '')) {
+      const firstVisible = document.querySelector('.sb-menu-item[style*="display: flex"]');
       if (firstVisible && firstVisible !== activeMenu) {
         firstVisible.click();
       }
@@ -15246,52 +15256,66 @@ async function gerarEstatisticas() {
   const fim = document.getElementById("est-fim")?.value;
 
   try {
+    // Converte datas locais (Assunção UTC-3) para UTC
+    let iniISO = null, fimISO = null;
+    if (ini) {
+      const off = _getAsuncionOffsetMs(new Date(ini + "T12:00:00"));
+      iniISO = new Date(new Date(ini + "T00:00:00").getTime() + off).toISOString();
+    }
+    if (fim) {
+      const off = _getAsuncionOffsetMs(new Date(fim + "T12:00:00"));
+      fimISO = new Date(new Date(fim + "T23:59:59").getTime() + off).toISOString();
+    }
+
     let query = supa
       .from("pedidos")
-      .select("itens, total_geral, subtotal, created_at")
-      .eq("status", "entregue");
-    if (ini) query = query.gte("created_at", ini + "T00:00:00");
-    if (fim) query = query.lte("created_at", fim + "T23:59:59");
+      .select("id, itens, total_geral, subtotal, created_at, status, forma_pagamento, quitado_em, forma_pagamento_quitacao")
+      .in("status", ["entregue", "em_preparo", "pronto_entrega", "saiu_entrega"]);
+
+    if (iniISO) query = query.gte("created_at", iniISO);
+    if (fimISO) query = query.lte("created_at", fimISO);
+
     const { data, error } = await query;
     if (error) throw error;
 
-    // Agrega por produto
+    // Agrega por produto (exclui "Na Nota" em aberto)
     const mapa = {};
     let faturamentoTotal = 0;
-    let totalPedidos = (data || []).length;
+    let totalPedidos = 0;
 
     (data || []).forEach((ped) => {
+      const pag = (ped.forma_pagamento || "").toLowerCase();
+      // NaNota só conta se já foi quitado
+      if (pag === "nanota" && !(ped.quitado_em && ped.forma_pagamento_quitacao)) return;
+
+      totalPedidos++;
       faturamentoTotal += ped.total_geral || ped.subtotal || 0;
+
       (Array.isArray(ped.itens) ? ped.itens : []).forEach((item) => {
-        const nome = item.nome || item.n || "Produto";
-        const preco = item.preco || item.p || 0;
-        const qtd = item.qtd || item.q || 1;
-        const cat = item.categoria_slug || item.cat || "";
-        const unid = item.unidade_venda || item.unid || "un";
-        if (!mapa[nome])
-          mapa[nome] = { nome, preco, cat, unid, qtd: 0, fat: 0 };
-        mapa[nome].qtd += qtd;
-        mapa[nome].fat += preco * qtd;
+        const nome   = item.nome || item.n || "Produto";
+        const preco  = item.preco || item.p || 0;
+        const isKg   = item._isKg || item.peso_gramas > 0;
+        const qtd    = isKg ? 0 : (item.qtd || item.q || 1);
+        const pesoG  = isKg ? (item.peso_gramas || 0) : 0;
+        const cat    = item.categoria_slug || item.cat || "";
+        const unid   = isKg ? "kg" : (item.unidade_venda || "un");
+        const fat    = isKg ? preco : preco * qtd;
+
+        if (!mapa[nome]) mapa[nome] = { nome, cat, unid, qtd: 0, pesoG: 0, fat: 0, preco };
+        mapa[nome].qtd   += qtd;
+        mapa[nome].pesoG += pesoG;
+        mapa[nome].fat   += fat;
       });
     });
 
     _estDados = Object.values(mapa).sort((a, b) => b.fat - a.fat);
 
-    // KPIs
-    const ticket =
-      totalPedidos > 0 ? Math.round(faturamentoTotal / totalPedidos) : 0;
-    const lucroEst = Math.round(faturamentoTotal * 0.3); // estimado 30%
-    const setKpi = (id, v) => {
-      const el = document.getElementById(id);
-      if (el) el.textContent = v;
-    };
-    setKpi(
-      "est-kpi-faturamento",
-      "Gs " + faturamentoTotal.toLocaleString("es-PY"),
-    );
-    setKpi("est-kpi-ticket", "Gs " + ticket.toLocaleString("es-PY"));
-    setKpi("est-kpi-lucro", "Gs " + lucroEst.toLocaleString("es-PY"));
-    setKpi("est-kpi-pedidos", totalPedidos.toLocaleString("es-PY"));
+    const ticket = totalPedidos > 0 ? Math.round(faturamentoTotal / totalPedidos) : 0;
+    const setKpi = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    setKpi("est-kpi-faturamento", "Gs " + faturamentoTotal.toLocaleString("es-PY"));
+    setKpi("est-kpi-ticket",      "Gs " + ticket.toLocaleString("es-PY"));
+    setKpi("est-kpi-lucro",       "Gs " + Math.round(faturamentoTotal * 0.3).toLocaleString("es-PY"));
+    setKpi("est-kpi-pedidos",     totalPedidos.toLocaleString("es-PY"));
 
     estAplicarFiltros();
   } catch (e) {

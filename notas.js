@@ -40,9 +40,16 @@ let _notas_filtro    = 'pendente'; // pendente | quitado | todos
 
 // ── INICIALIZAR ──────────────────────────────────────────────
 async function notasInicializar() {
-  document.getElementById('notas-loading')?.style && (document.getElementById('notas-loading').style.display = 'flex');
+  const loading = document.getElementById('notas-loading');
+  if (loading) loading.style.display = 'flex';
+
+  // ⚡ Carrega a sessão de caixa ANTES (necessária para quitar)
+  if (typeof _carregarSessaoCaixa === 'function') {
+    try { await _carregarSessaoCaixa(); } catch (_) {}
+  }
+
   await notasCarregar();
-  document.getElementById('notas-loading')?.style && (document.getElementById('notas-loading').style.display = 'none');
+  if (loading) loading.style.display = 'none';
 }
 
 async function notasCarregar() {

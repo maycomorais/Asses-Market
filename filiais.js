@@ -31,14 +31,22 @@ async function carregarPerfilAtual() {
     const { data: { session } } = await supa.auth.getSession();
     if (!session) return;
 
-    const { data } = await supa
+    const { data, error } = await supa
       .from('perfis_acesso')
-      .select('cargo, role, filial_id, nome_display, nome')
-      .eq('id', session.user.id)   // id é o próprio UUID do user, não usuario_id
+      .select('cargo, nome_display, filial_id, ativo')
+      .eq('id', session.user.id)
       .maybeSingle();
 
-      _perfil_atual = data;
-    } catch (e) { console.warn('carregarPerfilAtual:', e.message); }
+    if (error) { console.warn('carregarPerfilAtual:', error.message); return; }
+
+    // Normaliza o formato esperado pelo resto do arquivo
+    _perfil_atual = data ? {
+      role:      data.cargo,       // O banco usa 'cargo', o JS espera 'role'
+      nome:      data.nome_display,
+      filial_id: data.filial_id,
+      ativo:     data.ativo,
+    } : null;
+  } catch (e) { console.warn('carregarPerfilAtual:', e.message); }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -256,8 +264,8 @@ async function carregarUsuariosAdmin() {
   try {
     const { data, error } = await supa
       .from('perfis_acesso')
-      .select('id, usuario_id, email, nome, role, filial_id, ativo')
-      .order('nome');
+      .select('id, email, nome_display, cargo, filial_id, ativo')
+      .order('nome_display');
 
     if (error) { console.warn('carregarUsuariosAdmin:', error.message); return; }
     _filiais_usuarios = data || [];
@@ -278,16 +286,18 @@ function renderUsuariosAdmin() {
     adminMaster: { label: 'Master',      bg: '#1a7a2e', color: '#fff' },
     gerente:     { label: 'Gerente',     bg: '#3b82f6', color: '#fff' },
     funcionario: { label: 'Operador',    bg: '#8b5cf6', color: '#fff' },
-    motoboy:     { label: 'Repartidor',  bg: '#f59e0b', color: '#fff' },
+    garcom:      { label: 'Garçom',      bg: '#8b5cf6', color: '#fff' },
+    socio:       { label: 'Sócio',       bg: '#f59e0b', color: '#fff' },
+    dono:        { label: 'Dono',        bg: '#f59e0b', color: '#fff' },
   };
 
   tbody.innerHTML = _filiais_usuarios.map(u => {
-    const rb     = roleBadge[u.role] || roleBadge.funcionario;
+    const rb     = roleBadge[u.cargo] || { label: u.cargo || 'N/A', bg: '#ccc', color: '#333' };
     const filial = _filiais_list.find(f => f.id === u.filial_id);
 
     return `
       <tr>
-        <td style="font-weight:600">${u.nome || '—'}<br>
+        <td style="font-weight:600">${u.nome_display || '—'}<br>
           <span style="font-size:0.75rem;color:#9ca3af;font-weight:400">${u.email || ''}</span>
         </td>
         <td>
@@ -321,8 +331,8 @@ function abrirModalUsuario(perfilId) {
   if (!u) return;
 
   document.getElementById('ua-perfil-id').value  = u.id;
-  document.getElementById('ua-nome').value        = u.nome || '';
-  document.getElementById('ua-role').value        = u.role || 'funcionario';
+  document.getElementById('ua-nome').value        = u.nome_display || '';
+  document.getElementById('ua-role').value        = u.cargo || 'funcionario';
   document.getElementById('ua-ativo').checked     = u.ativo !== false;
 
   const selFilial = document.getElementById('ua-filial');
@@ -332,9 +342,31 @@ function abrirModalUsuario(perfilId) {
     ).join('');
 
   document.getElementById('ua-filial-row').style.display =
-    (document.getElementById('ua-role').value === 'adminMaster') ? 'none' : 'block';
+    (u.cargo === 'adminMaster') ? 'none' : 'block';
 
   document.getElementById('modal-filial-usuario').style.display = 'flex';
+}
+
+async function salvarUsuarioAdmin() {
+  const perfilId = document.getElementById('ua-perfil-id').value;
+  const nome     = document.getElementById('ua-nome').value.trim();
+  const role     = document.getElementById('ua-role').value;
+  const filialId = document.getElementById('ua-filial').value || null;
+  const ativo    = document.getElementById('ua-ativo').checked;
+
+  if (!nome) { alert('Informe el nombre del usuario.'); return; }
+  if (role !== 'adminMaster' && !filialId) {
+    if (!confirm(`El rol "${role}" normalmente requiere una filial asignada.\n¿Guardar sin filial?`)) return;
+  }
+
+  const { error } = await supa
+    .from('perfis_acesso')
+    .update({ nome_display: nome, cargo: role, filial_id: filialId, ativo })
+    .eq('id', perfilId);
+
+  if (error) { alert('Error: ' + error.message); return; }
+  fecharModal('modal-filial-usuario');
+  await carregarUsuariosAdmin();
 }
 
 async function salvarUsuarioAdmin() {
