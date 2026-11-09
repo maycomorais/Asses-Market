@@ -121,7 +121,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     _perfilId = session.user.id;
     _perfilNome = perfil?.nome_display || session.user.email || "Admin";
-    window._operadorNome = _perfilNome;
     perfilUsuario = perfil ? perfil.cargo : "dono";
 
     // Atualiza sidebar: nome, cargo e email
@@ -433,13 +432,6 @@ function showTab(tabId, event) {
   console.log("Tentando abrir aba:", tabId);
   console.log("Event:", event);
 
-  // 🔒 SEGURANÇA: Bloqueia acesso à aba Master para qualquer um que não seja adminMaster
-  if (tabId === "adminmaster" && perfilUsuario !== "adminMaster") {
-    console.warn("Acesso negado à aba Master.");
-    alert("Acesso restrito. Apenas o Admin Master pode acessar esta aba.");
-    return;
-  }
-
   // 1. O 'de-para' para garantir que IDs como 'categorias' ou 'motoboys'
   // abram a aba pai correta no seu novo HTML
   let realTabId = tabId;
@@ -492,6 +484,8 @@ function showTab(tabId, event) {
     if (tabId === "categorias") showSubTab("lista-categorias-wrapper");
     else if (tabId === "motoboys") showSubTab("lista-motos-wrapper");
     else {
+      // Clique direto em "Produtos": sempre abre a lista de produtos,
+      // ignorando qualquer sub-aba salva de navegação anterior (ex: Categorias).
       showSubTab("lista-produtos-wrapper");
     }
   }
@@ -664,36 +658,26 @@ function _feat(categoria, chave) {
 
 function _aplicarVisibilidadeAbas() {
   const mapa = {
-    "menu-pedidos":       "pedidos",
-    "menu-cozinha":       "cozinha",
-    "menu-pdv":           "pdv",
-    "menu-financeiro":    "financeiro",
-    "menu-inventario":    "inventario",
-    "menu-equipe":        "equipe",
+    "menu-pedidos": "pedidos",
+    "menu-cozinha": "cozinha",
+    "menu-pdv": "pdv",
+    "menu-financeiro": "financeiro",
+    "menu-inventario": "inventario",
+    "menu-equipe": "equipe",
     "menu-configuracoes": "configuracoes",
-    "menu-dashboard":     "dashboard",
-    "menu-estatisticas":  "estatisticas",
+    "menu-dashboard": "dashboard",
+    "menu-estatisticas": "estatisticas",
     "menu-ficha-tecnica": "ficha-tecnica",
-    "menu-crm":           "crm",
-    "menu-turnos":        "turnos",
-    "menu-produtos":      "produtos",
-    "menu-categorias":    "categorias",
-    "menu-motoboys":      "motoboys",
-    "menu-mensalistas":   "mensalistas",
-    "menu-filiais":       "filiais",
-    "menu-notas":         "notas",
-    "menu-facturacion":   "facturacion"
+    "menu-crm": "crm",
+    "menu-turnos": "turnos",
+    "menu-produtos": "produtos",
+    "menu-categorias": "categorias",
+    "menu-motoboys": "motoboys",
+    "menu-mensalistas": "mensalistas",
+    "menu-filiais": "filiais",
+    "menu-notas": "notas",
+    "menu-facturacion": "facturacion",
   };
-  
-  // 🔒 SEGURANÇA: Oculta a aba Master explicitamente para não-admins
-  const menuAM = document.getElementById("menu-adminmaster");
-  if (menuAM) {
-    if (perfilUsuario === "adminMaster") {
-      menuAM.style.setProperty("display", "flex", "important");
-    } else {
-      menuAM.style.setProperty("display", "none", "important");
-    }
-  }
 
   if (perfilUsuario === "adminMaster") return;
 
@@ -704,21 +688,27 @@ function _aplicarVisibilidadeAbas() {
       return;
     }
     const visivel = _feat("tabs", chave);
-    
+
+    // Usa important para evitar que regras CSS de flexbox mostrem o item
     if (visivel) {
       el.style.setProperty("display", "flex", "important");
     } else {
       el.style.setProperty("display", "none", "important");
     }
   });
-  
+
   _aplicarFuncionalidades();
 
   // Redirecionamento inteligente
   setTimeout(() => {
-    const activeMenu = document.querySelector('.sb-menu-item.active');
-    if (activeMenu && (activeMenu.style.display === 'none' || activeMenu.style.display === '')) {
-      const firstVisible = document.querySelector('.sb-menu-item[style*="display: flex"]');
+    const activeMenu = document.querySelector(".sb-menu-item.active");
+    if (
+      activeMenu &&
+      (activeMenu.style.display === "none" || activeMenu.style.display === "")
+    ) {
+      const firstVisible = document.querySelector(
+        '.sb-menu-item[style*="display: flex"]',
+      );
       if (firstVisible && firstVisible !== activeMenu) {
         firstVisible.click();
       }
@@ -2654,16 +2644,41 @@ async function calcularFinanceiro() {
   const facturaFiltro = elFactura ? elFactura.value : "todos";
 
   // ── 4. Busca pedidos dentro da janela da sessão ───────────────────
-  let query = supa
-    .from("pedidos")
-    .select("*, motoboys(nome)")
-    .neq("status", "cancelado")
-    .or(
-      `and(created_at.gte.${utcI},created_at.lte.${utcF}),and(quitado_em.gte.${utcI},quitado_em.lte.${utcF})`,
-    );
+    // ── 4. Busca pedidos dentro da janela da sessão (COM PAGINAÇÃO) ───────────────────
+  let peds = [];
+  let page = 0;
+  const pageSize = 1000;
+  let temMais = true;
 
-  const { data: pedidos } = await query;
-  let peds = pedidos || [];
+  while (temMais) {
+    const query = supa
+      .from("pedidos")
+      .select("*, motoboys(nome)")
+      .neq("status", "cancelado")
+      .or(
+        `and(created_at.gte.${utcI},created_at.lte.${utcF}),and(quitado_em.gte.${utcI},quitado_em.lte.${utcF})`,
+      )
+      .order("created_at", { ascending: true })
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("Erro ao buscar pedidos:", error);
+      break;
+    }
+
+    if (data && data.length > 0) {
+      peds = peds.concat(data);
+      page++;
+      // Se retornou menos de 1000, significa que chegamos no fim da lista
+      if (data.length < pageSize) {
+        temMais = false;
+      }
+    } else {
+      temMais = false;
+    }
+  };
 
   // 🚨 O FILTRO MÁGICO DO NA NOTA 🚨
   peds = peds.filter((p) => {
@@ -6708,10 +6723,15 @@ async function salvarProduto() {
         ) || 0;
     }
 
-    if (document.getElementById("prod-venda-kg")?.checked) {
-      const pkgVal =
-        parseFloat(document.getElementById("prod-preco-kg")?.value) || 0;
-      if (pkgVal > 0) precoBase = pkgVal;
+    // ── Detecta Venda por Kg ──────────────────────────────────
+    // (precisa vir ANTES de montar montagem_config e do payload)
+    const _vendaKgAtiva =
+      document.getElementById("prod-venda-kg")?.checked === true;
+    const _precoKgVal =
+      parseFloat(document.getElementById("prod-preco-kg")?.value) || 0;
+
+    if (_vendaKgAtiva && _precoKgVal > 0) {
+      precoBase = _precoKgVal;
     }
 
     // ── Promoção ──────────────────────────────────────────────
@@ -6742,14 +6762,25 @@ async function salvarProduto() {
     // ── Faixas de preço (varejo/atacado) ──────────────────────
     const _faixasPreco = _coletarFaixasPreco();
 
-    // Preserva montagem_config existente quando não há faixas ativas.
-    // Sem isso, editar uma pizza/montável/combo sem mexer em faixas
-    // apaga a configuração original do produto.
+    // ── Monta montagem_config com a prioridade correta ────────
+    // 1) Faixas de preço (varejo/atacado) → __tipo: "varejo"
+    // 2) Venda por Kg                     → __tipo: "kg"
+    // 3) Nenhum dos dois → preserva o montagem_config antigo,
+    //    MAS remove __tipo "kg"/"varejo" caso o usuário tenha
+    //    desmarcado essas opções ao editar.
     let _montagemConfig = null;
     if (_faixasPreco) {
       _montagemConfig = { __tipo: "varejo", faixas_preco: _faixasPreco };
+    } else if (_vendaKgAtiva && _precoKgVal > 0) {
+      _montagemConfig = { __tipo: "kg", preco_kg: _precoKgVal };
     } else if (id && _produtosMap[id]?.montagem_config) {
-      _montagemConfig = _produtosMap[id].montagem_config;
+      const _cfgAntigo = _produtosMap[id].montagem_config;
+      const _tipoAntigo =
+        _cfgAntigo && !Array.isArray(_cfgAntigo) ? _cfgAntigo.__tipo : null;
+      // Só preserva se o config antigo NÃO era kg nem varejo
+      if (_tipoAntigo !== "kg" && _tipoAntigo !== "varejo") {
+        _montagemConfig = _cfgAntigo;
+      }
     }
 
     // ── Payload ───────────────────────────────────────────────
@@ -7041,15 +7072,41 @@ async function abrirModalProduto(produto = null, tipoInicial = null) {
     if (_emEl && temEst && produto.estoque_minimo != null)
       _emEl.value = produto.estoque_minimo;
 
-    // Venda por Kg
-    const eKg = produto.unidade_venda === "kg" && produto.preco_kg > 0;
+    // ── Venda por Kg ──────────────────────────────────────────
+    // Fonte de verdade: montagem_config.__tipo === "kg".
+    // Fallback: unidade_venda === "kg" e preco_kg > 0 (compat. com
+    // produtos antigos que só tinham unidade_venda).
+    let _cfgProdKg = produto.montagem_config;
+    if (typeof _cfgProdKg === "string") {
+      try {
+        _cfgProdKg = JSON.parse(_cfgProdKg);
+      } catch (_) {
+        _cfgProdKg = null;
+      }
+    }
+    const _ehKgPorMontagem =
+      _cfgProdKg &&
+      !Array.isArray(_cfgProdKg) &&
+      _cfgProdKg.__tipo === "kg";
+    const _ehKgPorUnidade =
+      produto.unidade_venda === "kg" && produto.preco_kg > 0;
+    const _ehKg = !!(_ehKgPorMontagem || _ehKgPorUnidade);
+
+    // Preço por kg: prioriza o valor salvo dentro do montagem_config,
+    // senão usa o campo legado produto.preco_kg.
+    const _precoKgEdit =
+      _ehKgPorMontagem && _cfgProdKg?.preco_kg
+        ? Number(_cfgProdKg.preco_kg)
+        : produto.preco_kg || 0;
+
     const _vkEl = document.getElementById("prod-venda-kg");
     if (_vkEl) {
-      _vkEl.checked = eKg;
-      toggleVendaKg(eKg);
+      _vkEl.checked = _ehKg;
+      toggleVendaKg(_ehKg);
     }
     const _pkEl = document.getElementById("prod-preco-kg");
-    if (_pkEl && produto.preco_kg) _pkEl.value = produto.preco_kg;
+    if (_pkEl && _precoKgEdit > 0) _pkEl.value = _precoKgEdit;
+
     // ── Perecível ──────────────────────────────────────────
     const _perEl = document.getElementById("prod-perecivel");
     if (_perEl) {
@@ -15256,66 +15313,52 @@ async function gerarEstatisticas() {
   const fim = document.getElementById("est-fim")?.value;
 
   try {
-    // Converte datas locais (Assunção UTC-3) para UTC
-    let iniISO = null, fimISO = null;
-    if (ini) {
-      const off = _getAsuncionOffsetMs(new Date(ini + "T12:00:00"));
-      iniISO = new Date(new Date(ini + "T00:00:00").getTime() + off).toISOString();
-    }
-    if (fim) {
-      const off = _getAsuncionOffsetMs(new Date(fim + "T12:00:00"));
-      fimISO = new Date(new Date(fim + "T23:59:59").getTime() + off).toISOString();
-    }
-
     let query = supa
       .from("pedidos")
-      .select("id, itens, total_geral, subtotal, created_at, status, forma_pagamento, quitado_em, forma_pagamento_quitacao")
-      .in("status", ["entregue", "em_preparo", "pronto_entrega", "saiu_entrega"]);
-
-    if (iniISO) query = query.gte("created_at", iniISO);
-    if (fimISO) query = query.lte("created_at", fimISO);
-
+      .select("itens, total_geral, subtotal, created_at")
+      .eq("status", "entregue");
+    if (ini) query = query.gte("created_at", ini + "T00:00:00");
+    if (fim) query = query.lte("created_at", fim + "T23:59:59");
     const { data, error } = await query;
     if (error) throw error;
 
-    // Agrega por produto (exclui "Na Nota" em aberto)
+    // Agrega por produto
     const mapa = {};
     let faturamentoTotal = 0;
-    let totalPedidos = 0;
+    let totalPedidos = (data || []).length;
 
     (data || []).forEach((ped) => {
-      const pag = (ped.forma_pagamento || "").toLowerCase();
-      // NaNota só conta se já foi quitado
-      if (pag === "nanota" && !(ped.quitado_em && ped.forma_pagamento_quitacao)) return;
-
-      totalPedidos++;
       faturamentoTotal += ped.total_geral || ped.subtotal || 0;
-
       (Array.isArray(ped.itens) ? ped.itens : []).forEach((item) => {
-        const nome   = item.nome || item.n || "Produto";
-        const preco  = item.preco || item.p || 0;
-        const isKg   = item._isKg || item.peso_gramas > 0;
-        const qtd    = isKg ? 0 : (item.qtd || item.q || 1);
-        const pesoG  = isKg ? (item.peso_gramas || 0) : 0;
-        const cat    = item.categoria_slug || item.cat || "";
-        const unid   = isKg ? "kg" : (item.unidade_venda || "un");
-        const fat    = isKg ? preco : preco * qtd;
-
-        if (!mapa[nome]) mapa[nome] = { nome, cat, unid, qtd: 0, pesoG: 0, fat: 0, preco };
-        mapa[nome].qtd   += qtd;
-        mapa[nome].pesoG += pesoG;
-        mapa[nome].fat   += fat;
+        const nome = item.nome || item.n || "Produto";
+        const preco = item.preco || item.p || 0;
+        const qtd = item.qtd || item.q || 1;
+        const cat = item.categoria_slug || item.cat || "";
+        const unid = item.unidade_venda || item.unid || "un";
+        if (!mapa[nome])
+          mapa[nome] = { nome, preco, cat, unid, qtd: 0, fat: 0 };
+        mapa[nome].qtd += qtd;
+        mapa[nome].fat += preco * qtd;
       });
     });
 
     _estDados = Object.values(mapa).sort((a, b) => b.fat - a.fat);
 
-    const ticket = totalPedidos > 0 ? Math.round(faturamentoTotal / totalPedidos) : 0;
-    const setKpi = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-    setKpi("est-kpi-faturamento", "Gs " + faturamentoTotal.toLocaleString("es-PY"));
-    setKpi("est-kpi-ticket",      "Gs " + ticket.toLocaleString("es-PY"));
-    setKpi("est-kpi-lucro",       "Gs " + Math.round(faturamentoTotal * 0.3).toLocaleString("es-PY"));
-    setKpi("est-kpi-pedidos",     totalPedidos.toLocaleString("es-PY"));
+    // KPIs
+    const ticket =
+      totalPedidos > 0 ? Math.round(faturamentoTotal / totalPedidos) : 0;
+    const lucroEst = Math.round(faturamentoTotal * 0.3); // estimado 30%
+    const setKpi = (id, v) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = v;
+    };
+    setKpi(
+      "est-kpi-faturamento",
+      "Gs " + faturamentoTotal.toLocaleString("es-PY"),
+    );
+    setKpi("est-kpi-ticket", "Gs " + ticket.toLocaleString("es-PY"));
+    setKpi("est-kpi-lucro", "Gs " + lucroEst.toLocaleString("es-PY"));
+    setKpi("est-kpi-pedidos", totalPedidos.toLocaleString("es-PY"));
 
     estAplicarFiltros();
   } catch (e) {
